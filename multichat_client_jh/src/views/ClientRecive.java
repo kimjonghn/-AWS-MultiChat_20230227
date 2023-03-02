@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.Socket;
+import java.nio.file.attribute.AclEntry;
 import java.util.List;
 import java.util.Map;
 
@@ -65,20 +66,23 @@ public class ClientRecive extends Thread{
 		case "refreshusernameList":
 			refreshUsernameList((List<String>)responseDto.getBody());
 			break;
-			
+		case "enterRoomSuccessfully":
+			ClientApplication.getInstance()
+							.getMainCard()
+							.show(ClientApplication.getInstance().getMainPanel(), "roomPanel");
+			break;
+		case "receiveMessage":
+			ClientApplication.getInstance().getChattingContent().append((String) responseDto.getBody() + "\n");
+			break;
+		case "exitRoom":
+			ClientApplication.getInstance().getChattingContent().setText("");
+			ClientApplication.getInstance().getMainCard().show(ClientApplication.getInstance().getMainPanel(), "roomListPanel");
 		default:			
 			break;
 		
 		}
 	}
-	private Room findRoom(Map<String, String> roomInfo) {
-		for(Room room : roomList) {
-			if(room.getRoomName().equals(roomInfo.get("roomName")) && room.getOwner().equals(roomInfo.get("owner"))) {
-				return room;
-			}
-		}
-		return null;
-	}
+	
 	
 	private void refreshRoomList(List<Map<String,String>> roomList) {
 		ClientApplication.getInstance().getRoomNameListModel().clear();
@@ -86,10 +90,12 @@ public class ClientRecive extends Thread{
 		for(Map<String,String> roomInfo : roomList) {
 			ClientApplication.getInstance().getRoomNameListModel().addElement(roomInfo.get("roomName"));
 		}
+		ClientApplication.getInstance().getRoomList().setSelectedIndex(0);
 	}
 	private void refreshUsernameList(List<String> usernameList) {
 		ClientApplication.getInstance().getUsernamelistModel().clear();
 		ClientApplication.getInstance().getUsernamelistModel().addAll(usernameList);
+		ClientApplication.getInstance().getJoinUserList().setSelectedIndex(0);
 	}
 	
 }

@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -31,44 +32,67 @@ public class ConnectedSocket extends Thread {
 	public ConnectedSocket(Socket socket) {//serverSocket
 		this.socket = socket;
 		gson = new Gson();
-		Room room = new Room("TestRoom" + index, "TestUser" + index);
-		index++;
-		roomList.add(room);
 	}
 	@Override
 	public void run() {
-		while(true) {
+		
 			BufferedReader bufferedReader;//연결된 소켓에서 데이터를 읽기위해 객체 생성 코드
 			try {
+				while(true) {
 				bufferedReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 				//socket.getInputStream() 메서드는 소켓으로 들어오는 입력 스트림(InputStream) 객체를 반환합니다.
 				String requestJson = bufferedReader.readLine();//readLine()메서드를 이용해 한줄씩 데이터를 읽을수 있다
 				
 				System.out.println("요청: " + requestJson);//json형식으로 바꾼 데이터
 				requestMapping(requestJson);
+				}
+			}catch(SocketException e) {
+				connectedSocketList.remove(this);//강제종료하는 유저 정보를 삭제
+				System.out.println(username + " : 클라이언트 종료");
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			
-		}
 	}
-	
+
 	private void requestMapping(String requestJson) {
 		RequestDto<?> requestDto = gson.fromJson(requestJson, RequestDto.class);
 		//json형식의 문자열을 파싱하여 RequestDto객체로 변환하는 코드
+		Room room = null;
 		switch(requestDto.getResource()) {//witch문을 이용하여 requestDto에서 추출한 요청 리소스에 따라 다른 메서드를 호출합니다.
 			case "usernameCheck"://client에서 usernameCheck이라는 요청을 했을때 지금 case문이 실행된다
 				checkUsername((String) requestDto.getBody());
 				//checkUsername() 메서드는 requestDto 객체의 body(이름) 필드에 담긴 데이터를 인자로 받아 처리합니다
 				break;
 			case "createRoom":
-				Room room = new Room((String) requestDto.getBody(), username);
+				room = new Room((String) requestDto.getBody(), username); //Room객체를 생성하여  roomname(requestDto에 body) owner(username) 
+				room.getUsers().add(this); //Room에 (List<ConnectedSocket> users) 유저 저장
+				roomList.add(room); // roomList에 room추가저장
+//				responseDto = new ResponseDto<String>("createRoomSuccessfully", null);
+				sendToMe(new ResponseDto<String>("createRoomSuccessfully", null));//서버에서는 이 메시지를 받으면, 새로운 채팅방을 만들었다는 응답을 클라이언트로 전송합니다.
+				refreshUsernameList(room);//방금만든 roomname과 owner를 메서드에게 보냄
+				sendToAll(refreshRoomList(), connectedSocketList);//
+				break;
+			case "enterRoom":
+				room = findRoom((Map<String, String>) requestDto.getBody());
 				room.getUsers().add(this);
-				roomList.add(room);
-				ResponseDto<String> responseDto = new ResponseDto<String>("createRoomSuccessfully", null);
-				sendToMe(responseDto);
-				refreshUsernameList(username);
-				sendToAll(refreshRoomList(), connectedSocketList);
+				sendToMe(new ResponseDto<String>("enterRoomSuccessfully", null));
+				refreshUsernameList(room);
+				break;
+			case "sendMessage": //메세지 보내기
+				room = findConnectedRoom(username);
+				sendToAll(new ResponseDto<String>("reciveMessage", username + ">>>" + (String) requestDto.getBody()), room.getUsers());
+				break;
+			case "exitRoom":
+				room = findConnectedRoom(username);
+				try {
+					if(room.getOwner().equals(username)) {
+						exitRoomAll(room);
+					}else {
+						exitRoom(room);
+					}
+				}catch (NullPointerException e) {
+					System.out.println("클라이언트 강제 종료됨");
+				}
 				break;
 		}
 	}
@@ -123,8 +147,7 @@ public class ConnectedSocket extends Thread {
 		return null;
 	}
 	
-	private void refreshUsernameList(String usernmae){
-		Room room = findConnectedRoom(usernmae);
+	private void refreshUsernameList(Room room){
 		List<String> usernameList = new ArrayList<>();
 		usernameList.add("방제목: " + room.getRoomName());
 		for(ConnectedSocket connectedSocket : room.getUsers()) {
@@ -137,6 +160,19 @@ public class ConnectedSocket extends Thread {
 		ResponseDto<List<String>> responseDto = new ResponseDto<List<String>>("refreshUsernameList", usernameList);
 		sendToAll(responseDto, room.getUsers());
 	}
+	
+	private void exitRoomAll(Room room) {
+		sendToAll(new ResponseDto<String>("exitRoom", null), room.getUsers());
+		roomList.remove(room);
+		sendToAll(refreshRoomList(), connectedSocketList);
+	}
+	
+	private void exitRoom(Room room) {
+		room.getUsers().remove(this);
+		sendToMe(new ResponseDto<String>("exitRoom", null));
+		refreshUsernameList(room);
+	}
+	
 	
 	private void sendToMe(ResponseDto<?> responseDto) {
 		try {
